@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bảng tính điểm cá nhân</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    font-family: Arial, sans-serif;
+    background: #f3f6fb;
+    color: #243247;
+  }
+  main { max-width: 1450px; margin: auto; }
+  h1 { font-size: 26px; }
+  .note { line-height: 1.6; color: #526174; }
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 20px 0;
+  }
+  input, select, button {
+    font: inherit;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 8px;
+  }
+  button {
+    background: #2563eb;
+    color: white;
+    border: none;
+    cursor: pointer;
+  }
+  button:hover { background: #1d4ed8; }
+  .table-wrap {
+    overflow-x: auto;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 3px 16px #0000000a;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 1200px;
+  }
+  th, td {
+    padding: 10px 6px;
+    border: 1px solid #e2e8f0;
+    text-align: center;
+  }
+  th { background: #eaf1ff; white-space: nowrap; }
+  .subject { width: 130px; }
+  .score { width: 65px; }
+  .count { width: 58px; }
+  .average {
+    font-weight: bold;
+    color: #1d4ed8;
+    background: #f4f8ff;
+  }
+  .year { color: #047857; background: #ecfdf5; }
+  .delete { background: #dc2626; }
+  .delete:hover { background: #b91c1c; }
+  .invalid { border: 2px solid #dc2626; background: #fff1f2; }
+  #status { min-height: 24px; color: #526174; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Bảng thống kê và tính điểm</h1>
+  <p class="note">
+    Thường xuyên: hệ số 1 · Giữa kì: hệ số 2 · Cuối kì: hệ số 3.
+
+    Cả năm: HK1 hệ số 1, HK2 hệ số 2.
+    Nhập đủ điểm của một học kì để xem trung bình học kì đó.
+  </p>
+
+  <div class="toolbar">
+    <input id="newSubject" placeholder="Tên môn học"
+           aria-label="Tên môn học mới">
+    <button id="addButton" type="button">+ Thêm môn</button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th rowspan="2">Môn học</th>
+          <th colspan="8">Học kì 1</th>
+          <th colspan="9">Học kì 2</th>
+          <th rowspan="2">TB cả năm</th>
+          <th rowspan="2">Thao tác</th>
+        </tr>
+        <tr>
+          <th>Số cột TX</th>
+          <th>TX1</th><th>TX2</th><th>TX3</th><th>TX4</th>
+          <th>Giữa kì</th><th>Cuối kì</th><th>TB HK1</th>
+          <th>Số cột TX</th>
+          <th>TX1</th><th>TX2</th><th>TX3</th><th>TX4</th><th>TX5</th>
+          <th>Giữa kì</th><th>Cuối kì</th><th>TB HK2</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+
+  <p id="status" aria-live="polite"></p>
+  <p class="note">
+    Ô “—” nghĩa là chưa đủ điểm hoặc có điểm không hợp lệ.
+Điểm hợp lệ nằm trong khoảng 0–10.
+
+  </p>
+</main>
+
+<script>
+const rows = document.getElementById("rows");
+const nameInput = document.getElementById("newSubject");
+const status = document.getElementById("status");
+
+function cell(row, className = "") {
+  const td = document.createElement("td");
+  td.className = className;
+  row.appendChild(td);
+  return td;
+}
+
+function scoreInput(row, label) {
+  const input = document.createElement("input");
+  input.type = "number";
+  input.min = "0";
+  input.max = "10";
+  input.step = "0.1";
+  input.className = "score";
+  input.setAttribute("aria-label", label);
+  cell(row).appendChild(input);
+  return input;
+}
+
+function createSemester(row, semester, maxCount) {
+  const select = document.createElement("select");
+  select.className = "count";
+  select.setAttribute("aria-label", "Số cột thường xuyên " + semester);
+
+  for (let n = 3; n <= maxCount; n++) {
+    const option = document.createElement("option");
+    option.value = n;
+    option.textContent = n;
+    select.appendChild(option);
+  }
+  cell(row).appendChild(select);
+
+  const regular = [];
+  for (let n = 1; n <= maxCount; n++) {
+    regular.push(scoreInput(row, semester + " thường xuyên " + n));
+  }
+
+  const mid = scoreInput(row, semester + " giữa kì");
+  const final = scoreInput(row, semester + " cuối kì");
+  const output = cell(row, "average");
+
+  return { select, regular, mid, final, output };
+}
+
+function roundOne(number) {
+  return Math.round((number + Number.EPSILON) * 10) / 10;
+}
+
+function semesterAverage(semester) {
+  const count = Number(semester.select.value);
+
+  semester.regular.forEach((input, index) => {
+    input.disabled = index >= count;
+    input.placeholder = input.disabled ? "—" : "";
+    if (input.disabled) input.classList.remove("invalid");
+  });
+
+  const items = [
+    ...semester.regular.slice(0, count).map(input => ({
+      input, weight: 1
+    })),
+    { input: semester.mid, weight: 2 },
+    { input: semester.final, weight: 3 }
+  ];
+
+  let total = 0;
+  let totalWeight = 0;
+  let hasInvalid = false;
+
+  for (const { input, weight } of items) {
+    const empty = input.value.trim() === "";
+    const value = input.valueAsNumber;
+
+    const invalid = input.validity.badInput ||
+      (!empty && (!Number.isFinite(value) || value < 0 || value > 10));
+
+    input.classList.toggle("invalid", invalid);
+
+    if (invalid) {
+      hasInvalid = true;
+      continue;
+    }
+
+    if (empty) continue;
+
+    total += value * weight;
+    totalWeight += weight;
+  }
+
+  if (hasInvalid || totalWeight === 0) {
+    semester.output.textContent = "—";
+    return null;
+  }
+
+  const result = roundOne(total / totalWeight);
+  semester.output.textContent = result.toFixed(1);
+  return result;
+}
+
+function addSubject(name) {
+  const row = document.createElement("tr");
+
+  const subject = document.createElement("input");
+  subject.className = "subject";
+  subject.value = name;subject.setAttribute("aria-label", "Tên môn học");
+  cell(row).appendChild(subject);
+
+  const first = createSemester(row, "HK1", 4);
+  const second = createSemester(row, "HK2", 5);
+  const year = cell(row, "average year");
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "delete";
+  remove.textContent = "Xóa";
+  cell(row).appendChild(remove);
+
+  function update() {
+    const averageFirst = semesterAverage(first);
+    const averageSecond = semesterAverage(second);
+
+    year.textContent =
+      averageFirst === null || averageSecond === null
+        ? "—"
+        : roundOne((averageFirst + averageSecond * 2) / 3).toFixed(1);
+  }
+
+  row.addEventListener("input", update);
+  row.addEventListener("change", update);
+
+  remove.addEventListener("click", () => {
+    if (confirm("Xóa môn " + subject.value + "?")) {
+      row.remove();
+      updateStatus();
+    }
+  });
+
+  rows.appendChild(row);
+  update();
+  updateStatus();
+}
+
+function updateStatus() {
+  status.textContent = "Số môn trong bảng: " + rows.children.length;
+}
+
+function addFromToolbar() {
+  const name = nameInput.value.trim();
+  if (!name) {
+    status.textContent = "Bạn hãy nhập tên môn trước khi thêm.";
+    nameInput.focus();
+    return;
+  }
+  addSubject(name);
+  nameInput.value = "";
+  nameInput.focus();
+}
+
+document.getElementById("addButton")
+  .addEventListener("click", addFromToolbar);
+
+nameInput.addEventListener("keydown", event => {
+  if (event.key === "Enter") addFromToolbar();
+});
+
+const STORAGE_KEY = "bangDiemCaNhan_v1";
+
+const fixedSubjects = [
+  "Toán",
+  "Ngữ văn",
+  "Tiếng Anh",
+  "Lịch sử",
+  "Vật lý",
+  "Hóa học",
+  "Sinh học",
+  "Tin học"
+];
+
+// Lấy điểm và số cột của từng môn trong bảng.
+function collectData() {
+  return Array.from(rows.children).map(row => ({
+    name: row.querySelector(".subject").value,
+
+    counts: Array.from(row.querySelectorAll("select.count"))
+      .map(select => select.value),
+
+    scores: Array.from(row.querySelectorAll("input.score"))
+      .map(input => input.value)
+  }));
+}
+
+// Tự lưu vào trình duyệt.
+function savePersonalData() {
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(collectData())
+    );
+
+    status.textContent =
+      "Đã tự lưu trên thiết bị lúc " +
+      new Date().toLocaleTimeString("vi-VN");
+  } catch (error) {
+    status.textContent =
+      "Không thể lưu. Trình duyệt có thể đang chặn lưu trữ hoặc đã hết dung lượng.";
+  }
+}
+
+// Đọc dữ liệu đã lưu.
+function loadPersonalData() {
+  let savedData = [];
+  let loadFailed = false;
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+
+    if (raw) {
+      const parsed = JSON.parse(raw);
+
+      if (!Array.isArray(parsed)) {
+        throw new Error("Dữ liệu không hợp lệ");
+      }
+
+      savedData = parsed;
+    }
+  } catch (error) {
+    loadFailed = true;
+  }
+
+  rows.innerHTML = "";
+
+  fixedSubjects.forEach(name => {
+    addSubject(name);
+
+    const row = rows.lastElementChild;
+    const saved = savedData.find(item => item && item.name === name);
+
+    if (!saved) return;
+
+    const selects = row.querySelectorAll("select.count");
+    const inputs = row.querySelectorAll("input.score");
+
+    // Khôi phục số cột thường xuyên.
+    selects.forEach((select, index) => {
+      const value = String(saved.counts?.[index] ?? "");
+      const allowed = Array.from(select.options)
+        .some(option => option.value === value);
+
+      if (allowed) select.value = value;
+    });
+
+    // Khôi phục tất cả điểm, kể cả cột đang tắt.
+    inputs.forEach((input, index) => {
+      const value = saved.scores?.[index];
+
+      if (typeof value === "string") {
+        input.value = value;
+      }
+    });
+
+    // Tính lại trung bình và cập nhật cột đang bật/tắt.
+    row.dispatchEvent(new Event("change"));
+  });
+
+  status.textContent = loadFailed
+    ? "Không đọc được dữ liệu đã lưu. Đã mở bảng trống."
+    : savedData.length > 0
+      ? "Đã khôi phục điểm được lưu trên thiết bị."
+      : "Nhập điểm để tự động lưu trên thiết bị.";
+}
+
+// Khôi phục trước, rồi mới bật tự lưu.
+loadPersonalData();
+
+rows.addEventListener("input", savePersonalData);
+rows.addEventListener("change", savePersonalData);
+
+</script>
+</body>
+</html>
